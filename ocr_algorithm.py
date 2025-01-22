@@ -1,6 +1,5 @@
 import numpy as np
 from PIL import Image
-from skimage.metrics import structural_similarity as ssim
 from scipy import ndimage
 import cv2
 
@@ -8,8 +7,8 @@ class OcrAlgorithm:
     def __init__(self):
         self.patterns = {
             'A': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
+                [0,0,1,0,0],
+                [0,1,0,1,0],
                 [1,1,1,1,1],
                 [1,0,0,0,1],
                 [1,0,0,0,1]
@@ -71,18 +70,18 @@ class OcrAlgorithm:
                 [1,1,1,1,1]
             ],
             'J': [
-                [0,0,0,0,1],
+                [0,0,0,1,1],
                 [0,0,0,0,1],
                 [0,0,0,0,1],
                 [1,0,0,0,1],
                 [0,1,1,1,0]
             ],
             'K': [
-                [1,0,0,0,1],
                 [1,0,0,1,0],
-                [1,1,1,0,0],
-                [1,0,0,1,0],
-                [1,0,0,0,1]
+                [1,0,1,0,0],
+                [1,1,0,0,0],
+                [1,0,1,0,0],
+                [1,0,0,1,0]
             ],
             'L': [
                 [1,0,0,0,0],
@@ -165,8 +164,8 @@ class OcrAlgorithm:
                 [1,0,0,0,1],
                 [1,0,0,0,1],
                 [1,0,1,0,1],
-                [1,1,0,1,1],
-                [1,0,0,0,1]
+                [1,0,1,0,1],
+                [1,1,0,1,1]
             ],
             'X': [
                 [1,0,0,0,1],
@@ -188,76 +187,6 @@ class OcrAlgorithm:
                 [0,0,1,0,0],
                 [0,1,0,0,0],
                 [1,1,1,1,1]
-            ],
-            '0': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [1,0,0,0,1],
-                [1,0,0,0,1],
-                [0,1,1,1,0]
-            ],
-            '1': [
-                [0,0,1,0,0],
-                [0,1,1,0,0],
-                [0,0,1,0,0],
-                [0,0,1,0,0],
-                [0,1,1,1,0]
-            ],
-            '2': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [0,0,1,1,0],
-                [0,1,0,0,0],
-                [1,1,1,1,1]
-            ],
-            '3': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [0,0,1,1,0],
-                [1,0,0,0,1],
-                [0,1,1,1,0]
-            ],
-            '4': [
-                [0,0,1,1,0],
-                [0,1,0,1,0],
-                [1,0,0,1,0],
-                [1,1,1,1,1],
-                [0,0,0,1,0]
-            ],
-            '5': [
-                [1,1,1,1,1],
-                [1,0,0,0,0],
-                [1,1,1,1,0],
-                [0,0,0,0,1],
-                [1,1,1,1,0]
-            ],
-            '6': [
-                [0,1,1,1,0],
-                [1,0,0,0,0],
-                [1,1,1,1,0],
-                [1,0,0,0,1],
-                [0,1,1,1,0]
-            ],
-            '7': [
-                [1,1,1,1,1],
-                [0,0,0,1,0],
-                [0,0,1,0,0],
-                [0,1,0,0,0],
-                [0,1,0,0,0]
-            ],
-            '8': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [0,1,1,1,0]
-            ],
-            '9': [
-                [0,1,1,1,0],
-                [1,0,0,0,1],
-                [0,1,1,1,1],
-                [0,0,0,0,1],
-                [0,1,1,1,0]
             ]
         }
         
@@ -296,13 +225,46 @@ class OcrAlgorithm:
                 })
 
         print(f"\nFound {len(regions)} potential characters.")
-        regions.sort(key=lambda r: r['x'])
+        regions.sort(key=lambda r: (r['y'], r['x']))
 
+        lines = self.group_by_lines(regions)
+        recognized_text = []
+
+        for line in lines:
+            line_text = self.recognize_line(line, binary_image)
+            recognized_text.append(line_text)
+
+        result = '\n'.join(recognized_text)
+        print(f"\nFinal recognized text: {result}")
+        return result
+
+    def group_by_lines(self, regions, line_threshold=10):
+        lines = []
+        current_line = []
+
+        for region in regions:
+            if not current_line:
+                current_line.append(region)
+            else:
+                last_region = current_line[-1]
+                if abs(region['y'] - last_region['y']) < line_threshold:
+                    current_line.append(region)
+                else:
+                    lines.append(current_line)
+                    current_line = [region]
+
+        if current_line:
+            lines.append(current_line)
+
+        return lines
+
+    def recognize_line(self, line, binary_image):
+        line.sort(key=lambda r: r['x'])
         recognized_text = []
         prev_x_end = 0
-        avg_width = np.mean([r['width'] for r in regions])
-        
-        for region in regions:
+        avg_width = np.mean([r['width'] for r in line])
+
+        for region in line:
             # Check for space
             if prev_x_end > 0 and (region['x'] - prev_x_end) > 1.5 * avg_width:
                 recognized_text.append(' ')
@@ -313,7 +275,6 @@ class OcrAlgorithm:
             ]
             
             # Ensure minimum size and padding
-            char_image = cv2.resize(char_image, (7, 7))
             char_image = cv2.resize(char_image, (5, 5))
             
             # Normalize to binary values
@@ -323,13 +284,11 @@ class OcrAlgorithm:
             recognized_text.append(char)
             prev_x_end = region['x'] + region['width']
 
-        result = ''.join(recognized_text)
-        print(f"\nFinal recognized text: {result}")
-        return result
+        return ''.join(recognized_text)
 
     def calculate_match_score(self, window, pattern):
         pattern = np.array(pattern)
-        return np.sum(np.abs(window - pattern)) / 25  # Fixed size of 5x5
+        return np.sum(np.abs(window - pattern)) / (pattern.size)  # Adjust for new size
 
     def recognize_character(self, char_image):
         best_match = ' '
@@ -349,7 +308,7 @@ def test_ocr():
     """Test function to verify OCR functionality."""
     ocr = OcrAlgorithm()
     try:
-        text = ocr.extract_text("test_image.png")  # Replace with your test image
+        text = ocr.extract_text("TestOCR.png")  # Replace with your test image
         print("Recognized text:")
         print(text)
     except Exception as e:
